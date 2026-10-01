@@ -1,0 +1,74 @@
+name: Build Debian Package
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller psutil nvidia-ml-py PyQt6
+
+    - name: Build Executable
+      run: |
+        pyinstaller --noconfirm --onedir --windowed --name "sysmon" SysMon.py
+
+    - name: Assemble Debian Package Structure
+      run: |
+        mkdir -p sysmon-pkg/DEBIAN
+        mkdir -p sysmon-pkg/usr/bin
+        mkdir -p sysmon-pkg/usr/lib/sysmon
+        mkdir -p sysmon-pkg/usr/share/applications
+
+        cp -r dist/sysmon/* sysmon-pkg/usr/lib/sysmon/
+
+        cat << 'EOF' > sysmon-pkg/usr/bin/sysmon
+        #!/bin/sh
+        exec /usr/lib/sysmon/sysmon "$@"
+        EOF
+        chmod +x sysmon-pkg/usr/bin/sysmon
+
+        cat << 'EOF' > sysmon-pkg/DEBIAN/control
+        Package: sysmon
+        Version: 1.0.0
+        Architecture: amd64
+        Maintainer: Developer <dev@example.com>
+        Depends: libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0, python3
+        Section: utils
+        Priority: optional
+        Description: System Monitor App
+         Real-time hardware performance monitor built with Python & PyQt6.
+        EOF
+
+        cat << 'EOF' > sysmon-pkg/usr/share/applications/sysmon.desktop
+        [Desktop Entry]
+        Type=Application
+        Name=System Monitor
+        Comment=Real-time Hardware System Monitor
+        Exec=sysmon
+        Icon=sysmon
+        Terminal=false
+        Categories=System;Utility;
+        EOF
+
+        dpkg-deb --build --root-owner-group sysmon-pkg sysmon_1.0.0_amd64.deb
+
+    - name: Upload .deb Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sysmon-deb-package
+        path: sysmon_1.0.0_amd64.deb

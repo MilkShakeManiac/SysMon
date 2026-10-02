@@ -46,13 +46,12 @@ jobs:
         Package: sysmon
         Version: 1.0.0
         Architecture: amd64
-        Maintainer: Developer <dev@example.com>
+        Maintainer: MilkshakeManiac App Soft
         Depends: libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0, python3
         Section: utils
         Priority: optional
         Description: System Monitor App
-         Real-time hardware performance monitor built with Python & PyQt6.
-        EOF
+         Real-time hardware performance monitor 
 
         cat << 'EOF' > sysmon-pkg/usr/share/applications/sysmon.desktop
         [Desktop Entry]

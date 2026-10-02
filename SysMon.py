@@ -1,4 +1,7 @@
 import sys
+from pathlib import Path
+
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
@@ -16,6 +19,14 @@ from PyQt6.QtWidgets import (
 # Core hardware monitoring library
 import psutil
 
+# Handle PyInstaller asset path resolution
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+
+ASSETS_DIR = BASE_DIR / "Assets"
+
 # Optional GPU handling (NVIDIA)
 try:
     import pynvml
@@ -30,10 +41,11 @@ class SystemMonitorWorker(QThread):
     stats_updated = pyqtSignal(dict)
 
     def run(self):
-        while True:
+        while not self.isInterruptionRequested():
             # CPU Metrics
             cpu_percent = psutil.cpu_percent(interval=1)
-            cpu_count = psutil.cpu_count(logical=True)
+            cpu_core_count = psutil.cpu_count(logical=False)
+            cpu_thread_count = psutil.cpu_count(logical=True)
             cpu_freq = psutil.cpu_freq()
             freq_ghz = f"{cpu_freq.current / 1000:.1f} GHz" if cpu_freq else "N/A"
 
@@ -75,7 +87,7 @@ class SystemMonitorWorker(QThread):
 
             stats = {
                 "cpu_percent": int(cpu_percent),
-                "cpu_cores": f"{cpu_count} Threads",
+                "cpu_cores": f"{cpu_core_count} Cores {cpu_thread_count} Threads",
                 "cpu_freq": freq_ghz,
                 
                 "ram_percent": int(ram.percent),
@@ -200,8 +212,12 @@ class SystemMonitorApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("System Monitor")
-        self.resize(1050, 680)
+        
+        icon_path = ASSETS_DIR / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
+        self.resize(1050, 680)
         self.setStyleSheet("QMainWindow { background-color: #1a1e24; }")
 
         main_widget = QWidget()
@@ -344,6 +360,14 @@ class SystemMonitorApp(QMainWindow):
         self.net_card.update_progress(stats["disk_percent"])
         self.net_card.update_val("sent", stats["net_sent"])
         self.net_card.update_val("recv", stats["net_recv"])
+
+    def closeEvent(self, event):
+        """Safely shut down the QThread worker when window closes."""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.requestInterruption()
+            self.worker.terminate()
+            self.worker.wait()
+        event.accept()
 
 
 if __name__ == "__main__":

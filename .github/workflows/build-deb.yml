@@ -3,6 +3,8 @@ name: Build Debian Package
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*'  # Triggers when you push a version tag like v1.0.0
   workflow_dispatch:
 
 jobs:
@@ -10,64 +12,92 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Extract Tag Version
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "$VERSION" = "$GITHUB_REF" ]; then VERSION="1.0.0"; fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller psutil nvidia-ml-py PyQt6
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Build Executable
-      run: |
-        pyinstaller --noconfirm --onedir --windowed --name "sysmon" SysMon.py
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller psutil nvidia-ml-py PyQt6
 
-    - name: Assemble Debian Package Structure
-      run: |
-        mkdir -p sysmon-pkg/DEBIAN
-        mkdir -p sysmon-pkg/usr/bin
-        mkdir -p sysmon-pkg/usr/lib/sysmon
-        mkdir -p sysmon-pkg/usr/share/applications
+      - name: Build Executable with Assets
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --add-data "Assets:Assets" --name "sysmon" SysMon.py
 
-        cp -r dist/sysmon/* sysmon-pkg/usr/lib/sysmon/
+      - name: Assemble Debian Package Structure
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
 
-        cat << 'EOF' > sysmon-pkg/usr/bin/sysmon
-        #!/bin/sh
-        exec /usr/lib/sysmon/sysmon "$@"
-        EOF
-        chmod +x sysmon-pkg/usr/bin/sysmon
+          # Create directory structure cleanly
+          mkdir -p build_dir/DEBIAN
+          mkdir -p build_dir/usr/bin
+          mkdir -p build_dir/usr/lib/sysmon
+          mkdir -p build_dir/usr/share/applications
 
-        cat << 'EOF' > sysmon-pkg/DEBIAN/control
-        Package: sysmon
-        Version: 1.0.0
-        Architecture: amd64
-        Maintainer: MilkshakeManiac App Soft
-        Depends: libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0, python3
-        Section: utils
-        Priority: optional
-        Description: System Monitor App
-         Real-time hardware performance monitor 
+          # Copy compiled output
+          cp -r dist/sysmon/* build_dir/usr/lib/sysmon/
 
-        cat << 'EOF' > sysmon-pkg/usr/share/applications/sysmon.desktop
-        [Desktop Entry]
-        Type=Application
-        Name=System Monitor
-        Comment=Real-time Hardware System Monitor
-        Exec=sysmon
-        Icon=sysmon
-        Terminal=false
-        Categories=System;Utility;
-        EOF
+          # 1. Launcher Script
+          cat << 'EOF' > build_dir/usr/bin/sysmon
+          #!/bin/sh
+          exec /usr/lib/sysmon/sysmon "$@"
+          EOF
+          chmod +x build_dir/usr/bin/sysmon
 
-        dpkg-deb --build --root-owner-group sysmon-pkg sysmon_1.0.0_amd64.deb
+          # 2. Control File
+          cat << EOF > build_dir/DEBIAN/control
+          Package: sysmon
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: MilkshakeManiac App Soft
+          Depends: libxcb-cursor0, libxcb-xinerama0, libxkbcommon-x11-0, python3
+          Section: utils
+          Priority: optional
+          Description: System Monitor App
+           Real-time hardware performance monitor built for Linux.
+          EOF
 
-    - name: Upload .deb Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: sysmon-deb-package
-        path: sysmon_1.0.0_amd64.deb
+          # 3. Desktop Entry
+          cat << 'EOF' > build_dir/usr/share/applications/sysmon.desktop
+          [Desktop Entry]
+          Type=Application
+          Name=System Monitor
+          Comment=Real-time Hardware System Monitor
+          Exec=/usr/bin/sysmon
+          Icon=/usr/lib/sysmon/Assets/icon.png
+          Terminal=false
+          Categories=System;Utility;
+          EOF
+
+          # Set permissions required by dpkg-deb
+          chmod -R 755 build_dir
+          chmod 644 build_dir/DEBIAN/control
+
+          # Build .deb package
+          dpkg-deb --build --root-owner-group build_dir sysmon_${VERSION}_amd64.deb
+
+      - name: Upload .deb Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysmon-deb-package
+          path: sysmon_*_amd64.deb
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: sysmon_*_amd64.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
